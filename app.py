@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
+
+# Reemplaza la conexión SQLite por esta versión compatible
+from sqlite3 import dbapi2 as sqlite3
+
 from datetime import datetime
 import hashlib
 import time
