@@ -9,7 +9,7 @@ import time
 import plotly.express as px
 
 # --- CONFIGURACIÓN INICIAL ---
-st.set_page_config(page_title="Sistema JNE - Verificación Firmas", layout="wide")
+st.set_page_config(page_title="Sistema de Verificación Firmas", layout="wide")
 
 # --- CONSTANTES ---
 ARCHIVO_FICHAS = "fichas.xlsx"
