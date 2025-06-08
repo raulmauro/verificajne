@@ -457,7 +457,7 @@ def reportes_page():
                 lambda x: "🟢 Buen ritmo" if x <= 100 else "🟠 Sobre carga"
             )
             st.subheader("📈 Progreso por Analista")
-            st.dataframe(analistas_group.style.background_gradient(subset=['porcentaje'], cmap='Blues'))
+            st.dataframe(analistas_group)
 
             fig_analistas = px.bar(
                 analistas_group,
