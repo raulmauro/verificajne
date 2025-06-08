@@ -237,7 +237,6 @@ def admin_page():
                                 (username, hashed_pw, salt, nombre, rol, int(activo)))
                             conn.commit()
                             st.success("Usuario creado exitosamente")
-                            time.sleep(1)
                             st.rerun()
                         except sqlite3.IntegrityError:
                             st.error("El nombre de usuario ya existe")
