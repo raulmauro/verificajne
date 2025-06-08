@@ -466,18 +466,28 @@ def reportes_page():
         df_analistas = pd.read_sql("SELECT * FROM analistas", conn)
         df_peritos = pd.read_sql("SELECT * FROM peritos", conn)
 
+        # Progreso por analista
         if not df_analistas.empty:
             analistas_group = df_analistas.groupby('usuario').agg(
                 total_fichas=('num_fic', 'count'),
                 conformes=('conforme', 'sum'),
                 derivados=('para_perito', 'sum')
             ).reset_index()
-            st.subheader("📈 Progreso por Analista")
-            st.dataframe(analistas_group.style.background_gradient(subset=['total_fichas'], cmap='Blues'))
+            analistas_group['porcentaje'] = (analistas_group['total_fichas'] / 420) * 100
 
+            st.subheader("📈 Progreso por Analista")
+            fig_analistas = px.bar(analistas_group,
+                                  x='usuario',
+                                  y='total_fichas',
+                                  color='porcentaje',
+                                  title="Fichas Revisadas por Analista",
+                                  labels={'total_fichas': 'Fichas revisadas', 'usuario': 'Analista'},
+                                  color_continuous_scale='Blues')
+            st.plotly_chart(fig_analistas, use_container_width=True)
         else:
             st.info("No hay datos de analistas registrados aún.")
 
+        # Progreso por perito
         if not df_peritos.empty:
             peritos_group = df_peritos.groupby('usuario').agg(
                 informes_realizados=('id', 'count'),
@@ -485,12 +495,21 @@ def reportes_page():
                 autenticas=('autentica', 'sum'),
                 falsas=('falsa', 'sum')
             ).reset_index()
-            st.subheader("⚖️ Progreso por Perito")
-            st.dataframe(peritos_group.style.background_gradient(subset=['informes_realizados'], cmap='Greens'))
+            peritos_group['promedio_tiempo'] = peritos_group['promedio_tiempo'].round(1)
 
+            st.subheader("⚖️ Progreso por Perito")
+            fig_peritos = px.bar(peritos_group,
+                                x='usuario',
+                                y='informes_realizados',
+                                color='autenticas',
+                                title="Informes Realizados por Perito",
+                                labels={'informes_realizados': 'Total de Informes', 'usuario': 'Perito'},
+                                color_continuous_scale='Greens')
+            st.plotly_chart(fig_peritos, use_container_width=True)
         else:
             st.info("No hay datos de peritos registrados aún.")
 
+        # Progreso general del proyecto
         completado = len(df_analistas) + len(df_peritos)
         porcentaje_completado = (completado / TOTAL_FICHAS) * 100
 
@@ -524,7 +543,7 @@ def reportes_page():
         st.error(f"Error al generar los reportes: {str(e)}")
     finally:
         conn.close()
-
+        
 # --- MAIN ---
 def main():
     if 'user' not in st.session_state:
