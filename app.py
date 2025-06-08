@@ -346,21 +346,22 @@ def perito_page():
         st.warning("No tienes informes pendientes para hoy")
         return
 
-    with st.form("encabezado_perito"):
-        cols = st.columns(3)
-        with cols[0]:
-            fecha = st.date_input("Fecha", datetime.now())
-        with cols[1]:
-            partido = st.selectbox("Partido", list(PARTIDOS.values()))
-        with cols[2]:
-            traslado_reniec = st.time_input("Traslado RENIEC", value=datetime.now().time())
-        col_inicio, col_fin = st.columns(2)
-        with col_inicio:
-            inicio_informes = st.time_input("Inicio Informes", value=datetime.now().time())
-        with col_fin:
-            fin_informes = st.time_input("Fin Informes")
-        if st.form_submit_button("Iniciar Jornada"):
-            st.success("Jornada iniciada correctamente")
+    partido = st.selectbox("Partido", list(PARTIDOS.values()))
+
+    # Inicio y fin de jornada manejados desde sesión
+    if 'inicio_jornada' not in st.session_state:
+        if st.button("⏰ Iniciar jornada"):
+            st.session_state.inicio_jornada = datetime.now().strftime("%H:%M")
+            st.success(f"Jornada iniciada a las {st.session_state.inicio_jornada}")
+            st.rerun()
+    else:
+        st.info(f"🕒 Jornada iniciada a las {st.session_state.inicio_jornada}")
+
+        if 'fin_jornada' not in st.session_state:
+            if st.button("⏹️ Finalizar jornada"):
+                st.session_state.fin_jornada = datetime.now().strftime("%H:%M")
+                st.success(f"🏁 Jornada terminó a las {st.session_state.fin_jornada}")
+                st.rerun()
 
     MAX_FICHAS_POR_PAGINA = 5
     total_fichas = len(asignaciones)
@@ -377,13 +378,10 @@ def perito_page():
             with st.expander(f"Ficha: {caso['num_fic']} - DNI: {caso['dni']}", expanded=False):
                 st.markdown(f"**Análisis Grafológico - Ficha: {caso['num_fic']} | DNI: {caso['dni']}**")
 
-                col1, col2, col3 = st.columns([1,1,2])
-                with col1:
-                    autentica = st.checkbox("Auténtica ✓", key=f"aut_{idx}")
-                with col2:
-                    falsa = st.checkbox("Falsa ✗", key=f"fals_{idx}")
-                with col3:
-                    tiempo_min = st.number_input("Tiempo (min)", min_value=1, max_value=120, value=40, key=f"time_{idx}")
+                col1, col2, col3 = st.columns([1, 1, 2])
+                autentica = col1.checkbox("Auténtica ✓", key=f"aut_{idx}")
+                falsa = col2.checkbox("Falsa ✗", key=f"fals_{idx}")
+                tiempo_min = col3.number_input("Tiempo invertido (min)", min_value=1, max_value=120, value=40, key=f"time_{idx}")
 
                 observaciones = st.text_area("Observaciones técnicas", key=f"obs_{idx}")
                 informe = st.text_area("Informe detallado (mínimo 200 caracteres)", height=200, key=f"inf_{idx}")
@@ -404,20 +402,23 @@ def perito_page():
                 conn = sqlite3.connect('jne_verification.db')
                 cur = conn.cursor()
 
+                hora_inicio = st.session_state.get('inicio_jornada', datetime.now().strftime("%H:%M"))
+                hora_fin = st.session_state.get('fin_jornada', datetime.now().strftime("%H:%M"))
+
                 for res in resultados:
                     if len(res['informe']) < 200:
                         st.error(f"Informe de DNI {res['dni']} debe tener al menos 200 caracteres")
                         continue
 
                     cur.execute('''INSERT INTO peritos 
-                                  (fecha, usuario, partido, traslado_reniec, inicio_informes, fin_informes,
+                                  (fecha, usuario, partido, inicio_informes, fin_informes,
                                    dni, num_fic, autentica, falsa, tiempo_min, observaciones, informe, timestamp)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                               (fecha.strftime("%Y-%m-%d"), user['username'], res['partido'],
-                                traslado_reniec.strftime("%H:%M"), inicio_informes.strftime("%H:%M"),
-                                fin_informes.strftime("%H:%M"), res['dni'], res['num_fic'],
-                                int(res['autentica']), int(res['falsa']), res['tiempo_min'],
-                                res['observaciones'], res['informe'],
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                               (datetime.now().strftime("%Y-%m-%d"), user['username'], res['partido'],
+                                hora_inicio, hora_fin,
+                                res['dni'], res['num_fic'],
+                                int(res['autentica']), int(res['falsa']),
+                                res['tiempo_min'], res['observaciones'], res['informe'],
                                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
                     cur.execute('''UPDATE asignaciones SET completado = 1 
@@ -426,8 +427,16 @@ def perito_page():
 
                 conn.commit()
                 st.success("Informes guardados exitosamente")
+
+                # Limpiar estado después de guardar
+                if 'inicio_jornada' in st.session_state:
+                    del st.session_state['inicio_jornada']
+                if 'fin_jornada' in st.session_state:
+                    del st.session_state['fin_jornada']
+                if 'asignaciones_perito' in st.session_state:
+                    del st.session_state['asignaciones_perito']
+
                 time.sleep(1)
-                st.session_state.pop('asignaciones_perito', None)
                 st.rerun()
 
             except Exception as e:
