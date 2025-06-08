@@ -62,6 +62,7 @@ def init_db():
                      falsa INTEGER,
                      tiempo_min INTEGER,
                      observaciones TEXT,
+                     num_fic TEXT,
                      timestamp TEXT,
                      FOREIGN KEY(usuario) REFERENCES usuarios(username))''')
         # Asignaciones
