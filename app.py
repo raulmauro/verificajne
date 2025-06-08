@@ -58,6 +58,7 @@ def init_db():
                      inicio_informes TEXT,
                      fin_informes TEXT,
                      dni TEXT,
+                     num_fic TEXT,
                      autentica INTEGER,
                      falsa INTEGER,
                      tiempo_min INTEGER,
@@ -375,7 +376,7 @@ def perito_page():
     with st.form("informe_pericial"):
         for idx, caso in enumerate(casos_pagina):
             with st.expander(f"Ficha: {caso['num_fic']} - DNI: {caso['dni']}", expanded=False):
-                st.markdown(f"**Ficha evaluada:** {caso['num_fic']} | **DNI:** {caso['dni']}")
+                st.markdown(f"**Análisis Grafológico - Ficha: {caso['num_fic']} | DNI: {caso['dni']}**")
 
                 col1, col2, col3 = st.columns([1, 1, 2])
                 autentica = col1.checkbox("Auténtica ✓", key=f"aut_{idx}")
@@ -384,9 +385,6 @@ def perito_page():
 
                 observaciones = st.text_area("Observaciones técnicas", key=f"obs_{idx}")
 
-                # Campo para subir el informe de Word
-                uploaded_file = st.file_uploader(f"Subir informe técnico (Word) - Ficha {caso['num_fic']}", type=["docx"], key=f"file_{idx}")
-
                 resultados.append({
                     'dni': caso['dni'],
                     'num_fic': caso['num_fic'],
@@ -394,8 +392,7 @@ def perito_page():
                     'autentica': autentica,
                     'falsa': falsa,
                     'tiempo_min': tiempo_min,
-                    'observaciones': observaciones,
-                    'uploaded_file': uploaded_file
+                    'observaciones': observaciones
                 })
 
         if st.form_submit_button("Guardar Informes"):
@@ -407,28 +404,20 @@ def perito_page():
                 hora_fin = st.session_state.get('fin_jornada', datetime.now().strftime("%H:%M"))
 
                 for res in resultados:
-                    # Verificar que al menos uno de los dos esté marcado
+                    # Validar que al menos uno esté marcado (auténtica o falsa)
                     if not res['autentica'] and not res['falsa']:
                         st.error(f"Debes marcar si la firma es auténtica o falsa para la ficha {res['num_fic']}")
                         continue
 
-                    # Guardar archivo si se ha subido
-                    nombre_archivo = ""
-                    if res['uploaded_file'] is not None:
-                        nombre_archivo = res['uploaded_file'].name
-                        # Opcional: guardar el archivo en disco
-                        with open(os.path.join("informes_periciales", nombre_archivo), "wb") as f:
-                            f.write(res['uploaded_file'].getbuffer())
-
                     cur.execute('''INSERT INTO peritos 
                                   (fecha, usuario, partido, inicio_informes, fin_informes,
-                                   dni, num_fic, autentica, falsa, tiempo_min, observaciones, informe_tecnico, timestamp)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                   dni, num_fic, autentica, falsa, tiempo_min, observaciones, timestamp)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                                (datetime.now().strftime("%Y-%m-%d"), user['username'], res['partido'],
                                 hora_inicio, hora_fin,
                                 res['dni'], res['num_fic'],
                                 int(res['autentica']), int(res['falsa']),
-                                res['tiempo_min'], res['observaciones'], nombre_archivo,
+                                res['tiempo_min'], res['observaciones'],
                                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
                     cur.execute('''UPDATE asignaciones SET completado = 1 
