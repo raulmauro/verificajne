@@ -210,8 +210,7 @@ def login_page():
             if user:
                 st.session_state['user'] = user
                 st.success(f"Bienvenido {user['nombre']}")
-                time.sleep(1)
-                st.rerun()
+                st.info("Haz clic en 'Iniciar Sesión' nuevamente para continuar.")                
             else:
                 st.error("Usuario o contraseña incorrectos")
 
