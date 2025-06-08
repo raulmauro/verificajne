@@ -367,40 +367,104 @@ def perito_page():
         st.warning("No tienes informes pendientes para hoy")
         return
 
+    partido = st.selectbox("Partido", list(PARTIDOS.values()))
+
+    # Inicio y fin de jornada manejados desde sesión
+    if 'inicio_jornada' not in st.session_state:
+        if st.button("⏰ Iniciar jornada"):
+            st.session_state.inicio_jornada = datetime.now().strftime("%H:%M")
+            st.success(f"Jornada iniciada a las {st.session_state.inicio_jornada}")
+            st.rerun()
+    else:
+        st.info(f"🕒 Jornada iniciada a las {st.session_state.inicio_jornada}")
+
+        if 'fin_jornada' not in st.session_state:
+            if st.button("⏹️ Finalizar jornada"):
+                st.session_state.fin_jornada = datetime.now().strftime("%H:%M")
+                st.success(f"🏁 Jornada terminó a las {st.session_state.fin_jornada}")
+                st.rerun()
+
+    MAX_FICHAS_POR_PAGINA = 5
+    total_fichas = len(asignaciones)
+    paginas = (total_fichas // MAX_FICHAS_POR_PAGINA) + (1 if total_fichas % MAX_FICHAS_POR_PAGINA else 0)
+    pagina = st.number_input("Página", min_value=1, max_value=paginas, value=1)
+
+    inicio = (pagina - 1) * MAX_FICHAS_POR_PAGINA
+    fin = inicio + MAX_FICHAS_POR_PAGINA
+    casos_pagina = asignaciones[inicio:fin]
+
+    resultados = []
     with st.form("informe_pericial"):
-        for idx, caso in enumerate(asignaciones):
+        for idx, caso in enumerate(casos_pagina):
             with st.expander(f"Ficha: {caso['num_fic']} - DNI: {caso['dni']}", expanded=False):
-                st.markdown(f"**Análisis Grafológico - Ficha: {caso['num_fic']} | DNI: {caso['dni']}")
-                
-                col1, col2, col3 = st.columns([1,1,2])
-                with col1:
-                    autentica = st.checkbox("Auténtica ✓", key=f"aut_{idx}")
-                with col2:
-                    falsa = st.checkbox("Falsa ✗", key=f"fals_{idx}")
-                with col3:
-                    tiempo_min = st.number_input("Tiempo (min)", min_value=1, max_value=120, value=40, key=f"time_{idx}")
+                st.markdown(f"**Análisis Grafológico - Ficha: {caso['num_fic']} | DNI: {caso['dni']}**")
+
+                col1, col2, col3 = st.columns([1, 1, 2])
+                autentica = col1.checkbox("Auténtica ✓", key=f"aut_{idx}")
+                falsa = col2.checkbox("Falsa ✗", key=f"fals_{idx}")
+                tiempo_min = col3.number_input("Tiempo invertido (min)", min_value=1, max_value=120, value=40, key=f"time_{idx}")
 
                 observaciones = st.text_area("Observaciones técnicas", key=f"obs_{idx}")
+                informe = st.text_area("Informe detallado (mínimo 200 caracteres)", height=200, key=f"inf_{idx}")
 
+                resultados.append({
+                    'dni': caso['dni'],
+                    'num_fic': caso['num_fic'],
+                    'partido': caso['partido'],
+                    'autentica': autentica,
+                    'falsa': falsa,
+                    'tiempo_min': tiempo_min,
+                    'observaciones': observaciones,
+                    'informe': informe
+                })
+
+        if st.form_submit_button("Guardar Informes"):
+            try:
                 conn = sqlite3.connect('jne_verification.db')
-                try:
-                    conn.execute('''UPDATE asignaciones SET completado = 1 
-                                 WHERE dni = ? AND partido = ? AND tipo_asignacion = ?''',
-                              (caso['dni'], caso['partido'], 'perito'))
+                cur = conn.cursor()
 
-                    conn.execute('''INSERT INTO peritos 
+                hora_inicio = st.session_state.get('inicio_jornada', datetime.now().strftime("%H:%M"))
+                hora_fin = st.session_state.get('fin_jornada', datetime.now().strftime("%H:%M"))
+
+                for res in resultados:
+                    if len(res['informe']) < 200:
+                        st.error(f"Informe de DNI {res['dni']} debe tener al menos 200 caracteres")
+                        continue
+
+                    cur.execute('''INSERT INTO peritos 
                                   (fecha, usuario, partido, inicio_informes, fin_informes,
-                                   dni, num_fic, autentica, falsa, tiempo_min, observaciones, timestamp)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                               (datetime.now().strftime("%Y-%m-%d"), user['username'], caso['partido'],
-                                datetime.now().strftime("%H:%M"), datetime.now().strftime("%H:%M"),
-                                caso['dni'], caso['num_fic'],
-                                int(autentica), int(falsa),
-                                tiempo_min, observaciones,
+                                   dni, num_fic, autentica, falsa, tiempo_min, observaciones, informe, timestamp)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                               (datetime.now().strftime("%Y-%m-%d"), user['username'], res['partido'],
+                                hora_inicio, hora_fin,
+                                res['dni'], res['num_fic'],
+                                int(res['autentica']), int(res['falsa']),
+                                res['tiempo_min'], res['observaciones'], res['informe'],
                                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    conn.commit()
-                finally:
-                    conn.close()
+
+                    cur.execute('''UPDATE asignaciones SET completado = 1 
+                                 WHERE dni = ? AND partido = ? AND tipo_asignacion = ?''',
+                              (res['dni'], res['partido'], 'perito'))
+
+                conn.commit()
+                st.success("Informes guardados exitosamente")
+
+                # Limpiar estado después de guardar
+                if 'inicio_jornada' in st.session_state:
+                    del st.session_state['inicio_jornada']
+                if 'fin_jornada' in st.session_state:
+                    del st.session_state['fin_jornada']
+                if 'asignaciones_perito' in st.session_state:
+                    del st.session_state['asignaciones_perito']
+
+                time.sleep(1)
+                st.rerun()
+
+            except Exception as e:
+                conn.rollback()
+                st.error(f"Error al guardar los datos: {str(e)}")
+            finally:
+                conn.close()
 
         if st.form_submit_button("Guardar Informes"):
             st.success("Informes guardados exitosamente")
