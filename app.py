@@ -348,7 +348,7 @@ def perito_page():
 
     partido = st.selectbox("Partido", list(PARTIDOS.values()))
 
-    # Inicio y fin de jornada manejados desde sesión
+    # Inicio y fin de jornada manejados por sesión
     if 'inicio_jornada' not in st.session_state:
         if st.button("⏰ Iniciar jornada"):
             st.session_state.inicio_jornada = datetime.now().strftime("%H:%M")
@@ -376,7 +376,7 @@ def perito_page():
     with st.form("informe_pericial"):
         for idx, caso in enumerate(casos_pagina):
             with st.expander(f"Ficha: {caso['num_fic']} - DNI: {caso['dni']}", expanded=False):
-                st.markdown(f"**Análisis Grafológico - Ficha: {caso['num_fic']} | DNI: {caso['dni']}**")
+                st.markdown(f"**Ficha evaluada:** {caso['num_fic']} | **DNI:** {caso['dni']}")
 
                 col1, col2, col3 = st.columns([1, 1, 2])
                 autentica = col1.checkbox("Auténtica ✓", key=f"aut_{idx}")
@@ -384,7 +384,9 @@ def perito_page():
                 tiempo_min = col3.number_input("Tiempo invertido (min)", min_value=1, max_value=120, value=40, key=f"time_{idx}")
 
                 observaciones = st.text_area("Observaciones técnicas", key=f"obs_{idx}")
-                informe = st.text_area("Informe detallado (mínimo 200 caracteres)", height=200, key=f"inf_{idx}")
+
+                # Campo para subir el informe de Word
+                uploaded_file = st.file_uploader(f"Subir informe técnico (Word) - Ficha {caso['num_fic']}", type=["docx"], key=f"file_{idx}")
 
                 resultados.append({
                     'dni': caso['dni'],
@@ -394,7 +396,7 @@ def perito_page():
                     'falsa': falsa,
                     'tiempo_min': tiempo_min,
                     'observaciones': observaciones,
-                    'informe': informe
+                    'uploaded_file': uploaded_file
                 })
 
         if st.form_submit_button("Guardar Informes"):
@@ -406,19 +408,28 @@ def perito_page():
                 hora_fin = st.session_state.get('fin_jornada', datetime.now().strftime("%H:%M"))
 
                 for res in resultados:
-                    if len(res['informe']) < 200:
-                        st.error(f"Informe de DNI {res['dni']} debe tener al menos 200 caracteres")
+                    # Verificar que al menos uno de los dos esté marcado
+                    if not res['autentica'] and not res['falsa']:
+                        st.error(f"Debes marcar si la firma es auténtica o falsa para la ficha {res['num_fic']}")
                         continue
+
+                    # Guardar archivo si se ha subido
+                    nombre_archivo = ""
+                    if res['uploaded_file'] is not None:
+                        nombre_archivo = res['uploaded_file'].name
+                        # Opcional: guardar el archivo en disco
+                        with open(os.path.join("informes_periciales", nombre_archivo), "wb") as f:
+                            f.write(res['uploaded_file'].getbuffer())
 
                     cur.execute('''INSERT INTO peritos 
                                   (fecha, usuario, partido, inicio_informes, fin_informes,
-                                   dni, num_fic, autentica, falsa, tiempo_min, observaciones, informe, timestamp)
+                                   dni, num_fic, autentica, falsa, tiempo_min, observaciones, informe_tecnico, timestamp)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                                (datetime.now().strftime("%Y-%m-%d"), user['username'], res['partido'],
                                 hora_inicio, hora_fin,
                                 res['dni'], res['num_fic'],
                                 int(res['autentica']), int(res['falsa']),
-                                res['tiempo_min'], res['observaciones'], res['informe'],
+                                res['tiempo_min'], res['observaciones'], nombre_archivo,
                                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
                     cur.execute('''UPDATE asignaciones SET completado = 1 
