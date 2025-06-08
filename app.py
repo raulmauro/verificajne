@@ -54,15 +54,14 @@ def init_db():
                      fecha TEXT,
                      usuario TEXT,
                      partido TEXT,
-                     traslado_reniec TEXT,
                      inicio_informes TEXT,
                      fin_informes TEXT,
                      dni TEXT,
+                     num_fic TEXT,
                      autentica INTEGER,
                      falsa INTEGER,
                      tiempo_min INTEGER,
                      observaciones TEXT,
-                     num_fic TEXT,
                      timestamp TEXT,
                      FOREIGN KEY(usuario) REFERENCES usuarios(username))''')
         # Asignaciones
