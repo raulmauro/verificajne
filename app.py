@@ -215,100 +215,6 @@ def login_page():
             else:
                 st.error("Usuario o contraseña incorrectos")
 
-def admin_page():
-    st.title("Panel de Administración")
-    tab1, tab2, tab3 = st.tabs(["Usuarios", "Asignaciones", "Reportes"])
-    with tab1:
-        st.subheader("Gestión de Usuarios")
-        with sqlite3.connect('jne_verification.db') as conn:
-            usuarios = pd.read_sql("SELECT id, username, nombre, rol, activo FROM usuarios", conn)
-            st.dataframe(usuarios)
-            with st.expander("Crear Nuevo Usuario"):
-                with st.form("nuevo_usuario"):
-                    username = st.text_input("Nombre de usuario")
-                    password = st.text_input("Contraseña", type="password")
-                    nombre = st.text_input("Nombre completo")
-                    rol = st.selectbox("Rol", ["analista", "perito", "admin"])
-                    activo = st.checkbox("Activo", value=True)
-                    if st.form_submit_button("Registrar"):
-                        try:
-                            hashed_pw, salt = hash_password(password)
-                            conn.execute(
-                                "INSERT INTO usuarios (username, password, salt, nombre, rol, activo) VALUES (?, ?, ?, ?, ?, ?)",
-                                (username, hashed_pw, salt, nombre, rol, int(activo)))
-                            conn.commit()
-                            st.success("Usuario creado exitosamente")
-                            st.rerun()
-                        except sqlite3.IntegrityError:
-                            st.error("El nombre de usuario ya existe")
-    with tab2:
-        st.subheader("Asignación de Trabajo")
-        fichas_df = cargar_fichas()
-        if fichas_df is None:
-            st.error("No se pudo cargar el archivo de fichas")
-            return
-        with st.expander("Asignar Fichas a Analistas"):
-            with st.form("asignar_analistas"):
-                partido_cod = st.selectbox("Partido", list(PARTIDOS.keys()),
-                                         format_func=lambda x: PARTIDOS[x])
-                fichas_partido = fichas_df[fichas_df['COD_OP'] == partido_cod]
-                disponibles = len(fichas_partido)
-                st.info(f"Fichas disponibles para {PARTIDOS[partido_cod]}: {disponibles}")
-                cantidad = st.number_input("Cantidad de fichas", min_value=1,
-                                         max_value=disponibles,
-                                         value=min(420, disponibles))
-                usuario = st.selectbox("Analista",
-                                     pd.read_sql("SELECT username FROM usuarios WHERE rol = 'analista'",
-                                                sqlite3.connect('jne_verification.db'))['username'].tolist())
-                if st.form_submit_button("Asignar"):
-                    conn = sqlite3.connect('jne_verification.db')
-                    try:
-                        # Tomar las primeras 'cantidad' fichas no asignadas
-                        fichas_a_asignar = fichas_partido.head(cantidad)
-                        for _, ficha in fichas_a_asignar.iterrows():
-                            # Verificar si ya está asignada
-                            c = conn.cursor()
-                            c.execute('''SELECT 1 FROM asignaciones 
-                                        WHERE dni = ? AND partido = ? AND completado = 0''',
-                                    (ficha['COD_DNI'], PARTIDOS[partido_cod]))
-                            if not c.fetchone():
-                                conn.execute('''INSERT INTO asignaciones 
-                                            (dni, num_fic, partido, asignado_a, tipo_asignacion, fecha_asignacion, completado) 
-                                            VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                          (ficha['COD_DNI'], ficha['NUM_FIC'], PARTIDOS[partido_cod],
-                                           usuario, 'analista', datetime.now().strftime("%Y-%m-%d"), 0))
-                        conn.commit()
-                        st.success(f"{cantidad} fichas asignadas a {usuario}")
-                        time.sleep(2)
-                        st.rerun()
-                    except Exception as e:
-                        conn.rollback()
-                        st.error(f"Error al asignar: {str(e)}")
-                    finally:
-                        conn.close()
-    with tab3:
-        st.subheader("Reportes de Progreso")
-        conn = sqlite3.connect('jne_verification.db')
-        st.write("**Progreso de Analistas**")
-        analistas_progreso = pd.read_sql('''
-            SELECT u.nombre, a.partido, COUNT(*) as fichas_revisadas, 
-                   SUM(a.para_perito) as derivadas
-            FROM analistas a
-            JOIN usuarios u ON a.usuario = u.username
-            GROUP BY u.nombre, a.partido
-        ''', conn)
-        st.dataframe(analistas_progreso)
-        st.write("**Progreso de Peritos**")
-        peritos_progreso = pd.read_sql('''
-            SELECT u.nombre, p.partido, COUNT(*) as informes_realizados,
-                   AVG(p.tiempo_min) as tiempo_promedio
-            FROM peritos p
-            JOIN usuarios u ON p.usuario = u.username
-            GROUP BY u.nombre, p.partido
-        ''', conn)
-        st.dataframe(peritos_progreso)
-        conn.close()
-
 def analista_page():
     user = st.session_state['user']
     st.title(f"Formulario de Analista - {user['nombre']}")
@@ -323,90 +229,108 @@ def analista_page():
         st.warning("No tienes fichas asignadas para revisar hoy")
         return
 
-    with st.form("encabezado_analista"):
-        cols = st.columns(3)
-        with cols[0]:
-            fecha = st.date_input("Fecha", datetime.now())
-        with cols[1]:
-            partido = st.selectbox("Partido", list(PARTIDOS.values()))
-        with cols[2]:
-            turno = st.radio("Turno", ["Mañana", "Tarde"])
-        cols = st.columns(2)
-        with cols[0]:
-            hora_inicio = st.time_input("Hora Inicio", datetime.now().time())
-        with cols[1]:
-            hora_fin = st.time_input("Hora Fin")
-        if st.form_submit_button("Iniciar Jornada"):
-            st.success("Jornada iniciada correctamente")
+    # Campos fijos de la jornada
+    partido = st.selectbox("Partido", list(PARTIDOS.values()))
+    turno = st.radio("Turno", ["Mañana", "Tarde"])
 
-    MAX_FICHAS_POR_PAGINA = 10
-    total_fichas = len(asignaciones)
-    paginas = (total_fichas // MAX_FICHAS_POR_PAGINA) + (1 if total_fichas % MAX_FICHAS_POR_PAGINA else 0)
-    pagina = st.number_input("Página", min_value=1, max_value=paginas, value=1)
+    # Mostrar hora de inicio si ya se inició
+    if 'inicio_jornada' not in st.session_state:
+        if st.button("⏰ Iniciar jornada"):
+            st.session_state.inicio_jornada = datetime.now().strftime("%H:%M")
+            st.success(f"Jornada iniciada a las {st.session_state.inicio_jornada}")
+            st.rerun()
+    else:
+        st.info(f"🕒 Jornada iniciada a las {st.session_state.inicio_jornada}")
 
-    inicio = (pagina - 1) * MAX_FICHAS_POR_PAGINA
-    fin = inicio + MAX_FICHAS_POR_PAGINA
-    fichas_pagina = asignaciones[inicio:fin]
-
-    resultados = []
-    with st.form("verificacion_firmas"):
-        for idx, ficha in enumerate(fichas_pagina):
-            with st.expander(f"Ficha {ficha['num_fic']} - DNI: {ficha['dni']}", expanded=False):
-                col_conforme, col_perito, col_obs = st.columns([1,1,3])
-                with col_conforme:
-                    conforme = st.checkbox("Conforme ✓", key=f"conforme_{idx}")
-                with col_perito:
-                    para_perito = st.checkbox("Para perito ⚠️", key=f"perito_{idx}")
-                with col_obs:
-                    observaciones = st.text_input("Observaciones", key=f"obs_{idx}")
-
-                resultados.append({
-                    'dni': ficha['dni'],
-                    'num_fic': ficha['num_fic'],
-                    'partido': ficha['partido'],
-                    'conforme': conforme,
-                    'para_perito': para_perito,
-                    'observaciones': observaciones
-                })
-
-        if st.form_submit_button("Guardar Verificaciones"):
-            try:
-                conn = sqlite3.connect('jne_verification.db')
-                cur = conn.cursor()
-                for res in resultados:
-                    cur.execute('''INSERT INTO analistas 
-                                  (fecha, usuario, partido, turno, hora_inicio, hora_fin, 
-                                   num_fic, dni, conforme, para_perito, observaciones, timestamp)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                               (fecha.strftime("%Y-%m-%d"), user['username'], partido, turno,
-                                hora_inicio.strftime("%H:%M"), hora_fin.strftime("%H:%M"),
-                                res['num_fic'], res['dni'], int(res['conforme']),
-                                int(res['para_perito']), res['observaciones'],
-                                datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-
-                    if res['para_perito']:
-                        peritos = pd.read_sql("SELECT username FROM usuarios WHERE rol = 'perito'", conn)
-                        if not peritos.empty:
-                            perito = peritos.iloc[hash(res['dni']) % len(peritos)]['username']
-                            cur.execute('''INSERT INTO asignaciones 
-                                           (dni, num_fic, partido, asignado_a, tipo_asignacion, fecha_asignacion, completado)
-                                           VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                        (res['dni'], res['num_fic'], res['partido'], perito, 'perito',
-                                         datetime.now().strftime("%Y-%m-%d"), 0))
-
-                    cur.execute('''UPDATE asignaciones SET completado = 1 
-                                 WHERE dni = ? AND partido = ? AND tipo_asignacion = ?''',
-                              (res['dni'], res['partido'], 'analista'))
-                conn.commit()
-                st.success("Verificaciones guardadas exitosamente")
-                time.sleep(1)
-                st.session_state.pop('asignaciones_analista', None)
+        if 'fin_jornada' not in st.session_state:
+            if st.button("⏹️ Finalizar jornada"):
+                st.session_state.fin_jornada = datetime.now().strftime("%H:%M")
+                st.success(f"🏁 Jornada finalizada a las {st.session_state.fin_jornada}")
                 st.rerun()
-            except Exception as e:
-                conn.rollback()
-                st.error(f"Error al guardar los datos: {str(e)}")
-            finally:
-                conn.close()
+        else:
+            st.success(f"✅ Jornada terminó a las {st.session_state.fin_jornada}")
+
+    # Mostrar fichas solo si la jornada está iniciada
+    if 'inicio_jornada' in st.session_state:
+        fecha = st.date_input("Fecha", value=datetime.now())
+
+        MAX_FICHAS_POR_PAGINA = 10
+        total_fichas = len(asignaciones)
+        paginas = (total_fichas // MAX_FICHAS_POR_PAGINA) + (1 if total_fichas % MAX_FICHAS_POR_PAGINA else 0)
+        pagina = st.number_input("Página", min_value=1, max_value=paginas, value=1)
+
+        inicio = (pagina - 1) * MAX_FICHAS_POR_PAGINA
+        fin = inicio + MAX_FICHAS_POR_PAGINA
+        fichas_pagina = asignaciones[inicio:fin]
+
+        resultados = []
+        with st.form("verificacion_firmas"):
+            for idx, ficha in enumerate(fichas_pagina):
+                with st.expander(f"Ficha {ficha['num_fic']} - DNI: {ficha['dni']}", expanded=False):
+                    col_conforme, col_perito, col_obs = st.columns([1,1,3])
+                    conforme = col_conforme.checkbox("Conforme ✓", key=f"conforme_{idx}")
+                    para_perito = col_perito.checkbox("Para perito ⚠️", key=f"perito_{idx}")
+                    observaciones = col_obs.text_input("Observaciones", key=f"obs_{idx}")
+
+                    resultados.append({
+                        'dni': ficha['dni'],
+                        'num_fic': ficha['num_fic'],
+                        'partido': ficha['partido'],
+                        'conforme': conforme,
+                        'para_perito': para_perito,
+                        'observaciones': observaciones
+                    })
+
+            if st.form_submit_button("Guardar Verificaciones"):
+                try:
+                    conn = sqlite3.connect('jne_verification.db')
+                    cur = conn.cursor()
+
+                    hora_inicio = st.session_state.get('inicio_jornada', datetime.now().strftime("%H:%M"))
+                    hora_fin = st.session_state.get('fin_jornada', datetime.now().strftime("%H:%M"))
+
+                    for res in resultados:
+                        cur.execute('''INSERT INTO analistas 
+                                      (fecha, usuario, partido, turno, hora_inicio, hora_fin, 
+                                       num_fic, dni, conforme, para_perito, observaciones, timestamp)
+                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                   (fecha.strftime("%Y-%m-%d"), user['username'], partido, turno,
+                                    hora_inicio, hora_fin,
+                                    res['num_fic'], res['dni'], int(res['conforme']), 
+                                    int(res['para_perito']), res['observaciones'], 
+                                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+                        if res['para_perito']:
+                            peritos = pd.read_sql("SELECT username FROM usuarios WHERE rol = 'perito'", conn)
+                            if not peritos.empty:
+                                perito = peritos.iloc[hash(res['dni']) % len(peritos)]['username']
+                                cur.execute('''INSERT INTO asignaciones 
+                                              (dni, num_fic, partido, asignado_a, tipo_asignacion, fecha_asignacion, completado)
+                                              VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                                            (res['dni'], res['num_fic'], res['partido'], perito, 'perito',
+                                             datetime.now().strftime("%Y-%m-%d"), 0))
+
+                        cur.execute('''UPDATE asignaciones SET completado = 1 
+                                     WHERE dni = ? AND partido = ? AND tipo_asignacion = ?''',
+                                  (res['dni'], res['partido'], 'analista'))
+
+                    conn.commit()
+                    st.success("Verificaciones guardadas exitosamente")
+                    time.sleep(1)
+
+                    # Limpiar sesión después de guardar
+                    if 'inicio_jornada' in st.session_state:
+                        del st.session_state['inicio_jornada']
+                    if 'fin_jornada' in st.session_state:
+                        del st.session_state['fin_jornada']
+                    st.session_state.pop('asignaciones_analista', None)
+                    st.rerun()
+
+                except Exception as e:
+                    conn.rollback()
+                    st.error(f"Error al guardar los datos: {str(e)}")
+                finally:
+                    conn.close()
 
 def perito_page():
     user = st.session_state['user']
