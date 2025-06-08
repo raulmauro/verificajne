@@ -189,15 +189,27 @@ def admin_page():
             usuarios['activo'] = usuarios['activo'].map({1: 'Sí', 0: 'No'})
             st.dataframe(usuarios)
 
-            with st.expander("Crear Nuevo Usuario"):
-                with st.form("nuevo_usuario"):
-                    username = st.text_input("Nombre de usuario")
-                    password = st.text_input("Contraseña", type="password")
-                    nombre = st.text_input("Nombre completo")
-                    rol = st.selectbox("Rol", ["analista", "perito", "admin"])
-                    activo = st.checkbox("Activo", value=True)
-                    if st.form_submit_button("Registrar"):
-                        try:
+with st.expander("Crear Nuevo Usuario"):
+    with st.form("nuevo_usuario"):
+        username = st.text_input("Nombre de usuario")
+        password = st.text_input("Contraseña", type="password")
+        nombre = st.text_input("Nombre completo")
+        rol = st.selectbox("Rol", ["analista", "perito", "admin"])
+        activo = st.checkbox("Activo", value=True)
+        if st.form_submit_button("Registrar"):
+            try:
+                hashed_pw, salt = hash_password(password)
+                conn.execute(
+                    "INSERT INTO usuarios (username, password, salt, nombre, rol, activo) VALUES (?, ?, ?, ?, ?, ?)",
+                    (username, hashed_pw, salt, nombre, rol, int(activo)))
+                conn.commit()
+                st.success("Usuario creado exitosamente")
+                time.sleep(1)
+                st.rerun()
+            except sqlite3.IntegrityError:
+                st.error("El nombre de usuario ya existe")
+            except Exception as e:
+                st.error(f"Error al registrar: {str(e)}")                            
                             hashed_pw, salt = hash_password(password)
                             conn.execute(
                                 "INSERT INTO usuarios (username, password, salt, nombre, rol, activo) VALUES (?, ?, ?, ?, ?, ?)",
