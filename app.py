@@ -214,44 +214,45 @@ def admin_page():
             conn.close()
 
     with tab2:
-        st.subheader("Asignación de Trabajo")
-        fichas_df = cargar_fichas()
-        if fichas_df is None:
-            st.error("No se pudo cargar el archivo de fichas")
-            return
-        with st.expander("Asignar Fichas a Analistas"):
-            with st.form("asignar_analistas"):
-                partido_cod = st.selectbox("Partido", list(PARTIDOS.keys()), format_func=lambda x: PARTIDOS[x])
-                fichas_partido = fichas_df[fichas_df['COD_OP'] == partido_cod]
-                disponibles = len(fichas_partido)
-                st.info(f"Fichas disponibles para {PARTIDOS[partido_cod]}: {disponibles}")
-                cantidad = st.number_input("Cantidad de fichas", min_value=1, max_value=disponibles, value=min(420, disponibles))
-                usuario = st.selectbox("Analista",
-                                     pd.read_sql("SELECT username FROM usuarios WHERE rol = 'analista'", conn)['username'].tolist())
-                if st.form_submit_button("Asignar"):
-                    conn = sqlite3.connect('jne_verification.db')
-                    try:
-                        c = conn.cursor()
-                        fichas_a_asignar = fichas_partido.head(cantidad)
-                        for _, ficha in fichas_a_asignar.iterrows():
-                            c.execute('''SELECT 1 FROM asignaciones 
-                                        WHERE dni = ? AND num_fic = ? AND tipo_asignacion = ?''',
-                                     (ficha['COD_DNI'], ficha['NUM_FIC'], 'analista'))
-                            if not c.fetchone():
-                                conn.execute('''INSERT INTO asignaciones 
-                                              (dni, num_fic, partido, asignado_a, tipo_asignacion, fecha_asignacion, completado)
-                                              VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                          (ficha['COD_DNI'], ficha['NUM_FIC'], PARTIDOS[partido_cod],
-                                           usuario, 'analista', datetime.now().strftime("%Y-%m-%d"), 0))
-                        conn.commit()
-                        st.success(f"{cantidad} fichas asignadas a {usuario}")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        conn.rollback()
-                        st.error(f"Error al asignar: {str(e)}")
-                    finally:
-                        conn.close()
+    st.subheader("Asignación de Trabajo")
+    fichas_df = cargar_fichas()
+    if fichas_df is None:
+        st.error("No se pudo cargar el archivo de fichas")
+        return
+
+    partido_cod = st.selectbox("Partido", list(PARTIDOS.keys()), format_func=lambda x: PARTIDOS[x])
+    fichas_partido = fichas_df[fichas_df['COD_OP'] == partido_cod]
+    disponibles = len(fichas_partido)
+    cantidad = st.number_input("Cantidad de fichas", min_value=1, max_value=disponibles, value=min(420, disponibles))
+
+    # Abrir nueva conexión o reutilizar la misma
+    conn = sqlite3.connect('jne_verification.db')
+    try:
+        analistas_df = pd.read_sql_query("SELECT username FROM usuarios WHERE rol = 'analista'", conn)
+        usuario = st.selectbox("Analista", analistas_df['username'].tolist())
+        
+        if st.form_submit_button("Asignar"):
+            c = conn.cursor()
+            fichas_a_asignar = fichas_partido.head(cantidad)
+            for _, ficha in fichas_a_asignar.iterrows():
+                c.execute('''SELECT 1 FROM asignaciones 
+                             WHERE dni = ? AND num_fic = ? AND tipo_asignacion = ?''',
+                          (ficha['COD_DNI'], ficha['NUM_FIC'], 'analista'))
+                if not c.fetchone():
+                    conn.execute('''INSERT INTO asignaciones 
+                                  (dni, num_fic, partido, asignado_a, tipo_asignacion, fecha_asignacion, completado)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                               (ficha['COD_DNI'], ficha['NUM_FIC'], PARTIDOS[partido_cod],
+                                usuario, 'analista', datetime.now().strftime("%Y-%m-%d"), 0))
+            conn.commit()
+            st.success(f"{cantidad} fichas asignadas a {usuario}")
+            time.sleep(1)
+            st.rerun()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Error al asignar fichas: {str(e)}")
+    finally:
+        conn.close()
 
     with tab3:
         st.subheader("Reportes de Progreso")
