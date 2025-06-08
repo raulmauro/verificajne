@@ -38,7 +38,6 @@ def init_db():
                      fecha TEXT,
                      usuario TEXT,
                      partido TEXT,
-                     turno TEXT,
                      hora_inicio TEXT,
                      hora_fin TEXT,
                      num_fic TEXT,
@@ -132,6 +131,25 @@ def get_asignaciones_pendientes(usuario_id, tipo):
                   (usuario_id, tipo))
         return [{'dni': row[0], 'num_fic': row[1], 'partido': row[2]} for row in c.fetchall()]
 
+# --- EXPORTAR REPORTE A EXCEL ---
+def exportar_reporte_excel():
+    conn = sqlite3.connect('jne_verification.db')
+
+    try:
+        df_analistas = pd.read_sql("SELECT * FROM analistas", conn)
+        df_peritos = pd.read_sql("SELECT * FROM peritos", conn)
+
+        nombre_archivo = f"reporte_jne_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+
+        with pd.ExcelWriter(nombre_archivo, engine='openpyxl') as writer:
+            df_analistas.to_excel(writer, sheet_name="Analistas", index=False)
+            df_peritos.to_excel(writer, sheet_name="Peritos", index=False)
+
+        return nombre_archivo
+
+    finally:
+        conn.close()
+
 # --- PÁGINAS ---
 def login_page():
     st.title("Sistema de Verificación de Firmas - JNE")
@@ -151,13 +169,12 @@ def login_page():
 def admin_page():
     st.title("Panel de Administración")
     tab1, tab2, tab3 = st.tabs(["Usuarios", "Asignaciones", "Reportes"])
-
+    
     with tab1:
         st.subheader("Gestión de Usuarios")
         with sqlite3.connect('jne_verification.db') as conn:
             usuarios = pd.read_sql("SELECT id, username, nombre, rol, activo FROM usuarios", conn)
             st.dataframe(usuarios)
-
             with st.expander("Crear Nuevo Usuario"):
                 with st.form("nuevo_usuario"):
                     username = st.text_input("Nombre de usuario")
@@ -179,14 +196,13 @@ def admin_page():
                             st.error("El nombre de usuario ya existe")
                         except Exception as e:
                             st.error(f"Error al registrar: {str(e)}")
-
+    
     with tab2:
         st.subheader("Asignación de Trabajo")
         fichas_df = cargar_fichas()
         if fichas_df is None:
             st.error("No se pudo cargar el archivo de fichas")
             return
-
         with st.expander("Asignar Fichas a Analistas"):
             with st.form("asignar_analistas"):
                 partido_cod = st.selectbox("Partido", list(PARTIDOS.keys()), format_func=lambda x: PARTIDOS[x])
@@ -249,21 +265,23 @@ def analista_page():
         st.warning("No tienes fichas asignadas para revisar hoy")
         return
 
-    with st.form("encabezado_analista"):
-        cols = st.columns(3)
-        with cols[0]:
-            fecha = st.date_input("Fecha", datetime.now())
-        with cols[1]:
-            partido = st.selectbox("Partido", list(PARTIDOS.values()))
-        with cols[2]:
-            turno = st.radio("Turno", ["Mañana", "Tarde"])
-        cols = st.columns(2)
-        with cols[0]:
-            hora_inicio = st.time_input("Hora Inicio", datetime.now().time())
-        with cols[1]:
-            hora_fin = st.time_input("Hora Fin")
-        if st.form_submit_button("Iniciar Jornada"):
-            st.success("Jornada iniciada correctamente")
+    partido = st.selectbox("Partido", list(PARTIDOS.values()))
+
+    if 'inicio_jornada' not in st.session_state:
+        if st.button("⏰ Iniciar jornada"):
+            st.session_state.inicio_jornada = datetime.now().strftime("%H:%M")
+            st.success(f"Jornada iniciada a las {st.session_state.inicio_jornada}")
+            st.rerun()
+    else:
+        st.info(f"🕒 Jornada iniciada a las {st.session_state.inicio_jornada}")
+
+        if 'fin_jornada' not in st.session_state:
+            if st.button("⏹️ Finalizar jornada"):
+                st.session_state.fin_jornada = datetime.now().strftime("%H:%M")
+                st.success(f"🏁 Jornada terminó a las {st.session_state.fin_jornada}")
+                st.rerun()
+        else:
+            st.success(f"✅ Jornada terminó a las {st.session_state.fin_jornada}")
 
     MAX_FICHAS_POR_PAGINA = 10
     total_fichas = len(asignaciones)
@@ -279,7 +297,7 @@ def analista_page():
         for idx, ficha in enumerate(fichas_pagina):
             with st.expander(f"Ficha {ficha['num_fic']} - DNI: {ficha['dni']}", expanded=False):
                 col_conforme, col_perito, col_obs = st.columns([1,1,3])
-                conformes = col_conforme.checkbox("Conforme ✓", key=f"conforme_{idx}")
+                conforme = col_conforme.checkbox("Conforme ✓", key=f"conforme_{idx}")
                 para_perito = col_perito.checkbox("Para perito ⚠️", key=f"perito_{idx}")
                 observaciones = col_obs.text_input("Observaciones", key=f"obs_{idx}")
 
@@ -287,7 +305,7 @@ def analista_page():
                     'dni': ficha['dni'],
                     'num_fic': ficha['num_fic'],
                     'partido': ficha['partido'],
-                    'conforme': conformes,
+                    'conforme': conforme,
                     'para_perito': para_perito,
                     'observaciones': observaciones
                 })
@@ -296,17 +314,20 @@ def analista_page():
             try:
                 conn = sqlite3.connect('jne_verification.db')
                 cur = conn.cursor()
+                fecha = datetime.now().strftime("%Y-%m-%d")
+                hora_inicio = st.session_state.get('inicio_jornada', '')
+                hora_fin = st.session_state.get('fin_jornada', '')
+
                 for res in resultados:
                     cur.execute('''INSERT INTO analistas 
-                                  (fecha, usuario, partido, turno, hora_inicio, hora_fin, 
+                                  (fecha, usuario, partido, hora_inicio, hora_fin, 
                                    num_fic, dni, conforme, para_perito, observaciones, timestamp)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                               (fecha.strftime("%Y-%m-%d"), user['username'], partido, turno,
-                                hora_inicio.strftime("%H:%M"), hora_fin.strftime("%H:%M"),
-                                res['num_fic'], res['dni'], int(res['conforme']), 
-                                int(res['para_perito']), res['observaciones'], 
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                               (fecha, user['username'], partido, hora_inicio, hora_fin,
+                                res['num_fic'], res['dni'], int(res['conforme']),
+                                int(res['para_perito']), res['observaciones'],
                                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                    
+
                     if res['para_perito']:
                         peritos = pd.read_sql("SELECT username FROM usuarios WHERE rol = 'perito'", conn)
                         if not peritos.empty:
@@ -314,17 +335,17 @@ def analista_page():
                             cur.execute('''INSERT INTO asignaciones 
                                            (dni, num_fic, partido, asignado_a, tipo_asignacion, fecha_asignacion, completado)
                                            VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                                        (res['dni'], res['num_fic'], res['partido'], perito, 'perito', 
+                                        (res['dni'], res['num_fic'], res['partido'], perito, 'perito',
                                          datetime.now().strftime("%Y-%m-%d"), 0))
-                    
-                    cur.execute('''UPDATE asignaciones SET completado = 1 
-                                 WHERE dni = ? AND partido = ? AND tipo_asignacion = ?''',
-                              (res['dni'], res['partido'], 'analista'))
+
                 conn.commit()
                 st.success("Verificaciones guardadas exitosamente")
                 time.sleep(1)
                 st.session_state.pop('asignaciones_analista', None)
+                st.session_state.pop('inicio_jornada', None)
+                st.session_state.pop('fin_jornada', None)
                 st.rerun()
+
             except Exception as e:
                 conn.rollback()
                 st.error(f"Error al guardar los datos: {str(e)}")
@@ -345,21 +366,23 @@ def perito_page():
         st.warning("No tienes informes pendientes para hoy")
         return
 
-    with st.form("encabezado_perito"):
-        cols = st.columns(3)
-        with cols[0]:
-            fecha = st.date_input("Fecha", datetime.now())
-        with cols[1]:
-            partido = st.selectbox("Partido", list(PARTIDOS.values()))
-        with cols[2]:
-            traslado_reniec = st.time_input("Traslado RENIEC", value=datetime.now().time())
-        col_inicio, col_fin = st.columns(2)
-        with col_inicio:
-            inicio_informes = st.time_input("Inicio Informes", value=datetime.now().time())
-        with col_fin:
-            fin_informes = st.time_input("Fin Informes")
-        if st.form_submit_button("Iniciar Jornada"):
-            st.success("Jornada iniciada correctamente")
+    partido = st.selectbox("Partido", list(PARTIDOS.values()))
+
+    if 'inicio_jornada_perito' not in st.session_state:
+        if st.button("⏰ Iniciar jornada"):
+            st.session_state.inicio_jornada_perito = datetime.now().strftime("%H:%M")
+            st.success(f"Jornada iniciada a las {st.session_state.inicio_jornada_perito}")
+            st.rerun()
+    else:
+        st.info(f"🕒 Jornada iniciada a las {st.session_state.inicio_jornada_perito}")
+
+        if 'fin_jornada_perito' not in st.session_state:
+            if st.button("⏹️ Finalizar jornada"):
+                st.session_state.fin_jornada_perito = datetime.now().strftime("%H:%M")
+                st.success(f"🏁 Jornada terminó a las {st.session_state.fin_jornada_perito}")
+                st.rerun()
+        else:
+            st.success(f"✅ Jornada terminó a las {st.session_state.fin_jornada_perito}")
 
     MAX_FICHAS_POR_PAGINA = 5
     total_fichas = len(asignaciones)
@@ -371,14 +394,15 @@ def perito_page():
     casos_pagina = asignaciones[inicio:fin]
 
     resultados = []
-    for idx, caso in enumerate(casos_pagina):
-        with st.form(key=f"informe_pericial_{idx}"):
+    with st.form("informe_pericial"):
+        for idx, caso in enumerate(casos_pagina):
             with st.expander(f"Ficha: {caso['num_fic']} - DNI: {caso['dni']}", expanded=False):
-                st.markdown(f"**Análisis Grafológico - Ficha: {caso['num_fic']} | DNI: {caso['dni']}**")
+                st.markdown(f"**Análisis Grafológico - Ficha: {caso['num_fic']} | DNI: {caso['dni']}")
+
                 col1, col2, col3 = st.columns([1,1,2])
                 autentica = col1.checkbox("Auténtica ✓", key=f"aut_{idx}")
                 falsa = col2.checkbox("Falsa ✗", key=f"fals_{idx}")
-                tiempo_min = col3.number_input("Tiempo (min)", min_value=1, max_value=120, value=40, key=f"time_{idx}")
+                tiempo_min = col3.number_input("Tiempo invertido (min)", min_value=1, max_value=120, value=40, key=f"time_{idx}")
 
                 observaciones = st.text_area("Observaciones técnicas", key=f"obs_{idx}")
 
@@ -392,42 +416,46 @@ def perito_page():
                     'observaciones': observaciones
                 })
 
-            if st.form_submit_button("Guardar Informe"):
-                try:
-                    conn = sqlite3.connect('jne_verification.db')
-                    cur = conn.cursor()
-                    res = resultados[idx]
+        if st.form_submit_button("Guardar Informes"):
+            try:
+                conn = sqlite3.connect('jne_verification.db')
+                cur = conn.cursor()
+                fecha = datetime.now().strftime("%Y-%m-%d")
 
+                for res in resultados:
                     if not res['autentica'] and not res['falsa']:
-                        st.error(f"Informe de DNI {res['dni']} debe tener una opción marcada")
+                        st.error(f"Debes marcar si la firma es auténtica o falsa para la ficha {res['num_fic']}")
                         continue
 
                     cur.execute('''INSERT INTO peritos 
                                   (fecha, usuario, partido, inicio_informes, fin_informes,
                                    dni, num_fic, autentica, falsa, tiempo_min, observaciones, timestamp)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                               (fecha.strftime("%Y-%m-%d"), user['username'], res['partido'],
-                                inicio_informes.strftime("%H:%M"), fin_informes.strftime("%H:%M"),
+                               (fecha, user['username'], res['partido'],
+                                st.session_state.get('inicio_jornada_perito', ''),
+                                st.session_state.get('fin_jornada_perito', ''),
                                 res['dni'], res['num_fic'],
                                 int(res['autentica']), int(res['falsa']),
                                 res['tiempo_min'], res['observaciones'],
                                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-
+                    
                     cur.execute('''UPDATE asignaciones SET completado = 1 
                                  WHERE dni = ? AND partido = ? AND tipo_asignacion = ?''',
                               (res['dni'], res['partido'], 'perito'))
 
-                    conn.commit()
-                    st.success("Informe guardado exitosamente")
-                    time.sleep(1)
-                    st.session_state.pop('asignaciones_perito', None)
-                    st.rerun()
+                conn.commit()
+                st.success("Informes guardados exitosamente")
+                time.sleep(1)
+                st.session_state.pop('asignaciones_perito', None)
+                st.session_state.pop('inicio_jornada_perito', None)
+                st.session_state.pop('fin_jornada_perito', None)
+                st.rerun()
 
-                except Exception as e:
-                    conn.rollback()
-                    st.error(f"Error al guardar los datos: {str(e)}")
-                finally:
-                    conn.close()
+            except Exception as e:
+                conn.rollback()
+                st.error(f"Error al guardar los datos: {str(e)}")
+            finally:
+                conn.close()
 
 def reportes_page():
     st.title("📊 Reportes de Avance General")
@@ -445,7 +473,7 @@ def reportes_page():
                 derivados=('para_perito', 'sum')
             ).reset_index()
             st.subheader("📈 Progreso por Analista")
-            st.dataframe(analistas_group)
+            st.dataframe(analistas_group.style.background_gradient(subset=['total_fichas'], cmap='Blues'))
 
         else:
             st.info("No hay datos de analistas registrados aún.")
@@ -457,16 +485,13 @@ def reportes_page():
                 autenticas=('autentica', 'sum'),
                 falsas=('falsa', 'sum')
             ).reset_index()
-            peritos_group['promedio_tiempo'] = peritos_group['promedio_tiempo'].round(1)
             st.subheader("⚖️ Progreso por Perito")
-            st.dataframe(peritos_group)
+            st.dataframe(peritos_group.style.background_gradient(subset=['informes_realizados'], cmap='Greens'))
 
         else:
             st.info("No hay datos de peritos registrados aún.")
 
-        total_revisado = len(df_analistas)
-        total_informes = len(df_peritos)
-        completado = total_revisado + total_informes
+        completado = len(df_analistas) + len(df_peritos)
         porcentaje_completado = (completado / TOTAL_FICHAS) * 100
 
         st.subheader("📦 Progreso General del Proyecto")
@@ -484,6 +509,16 @@ def reportes_page():
             st.markdown(f"- Informes realizados: {len(df_peritos)}")
             st.markdown(f"- Auténticas: {df_peritos['autentica'].sum()}")
             st.markdown(f"- Falsas: {df_peritos['falsa'].sum()}")
+
+        if st.button("📥 Exportar Reporte a Excel"):
+            nombre_archivo = exportar_reporte_excel()
+            with open(nombre_archivo, "rb") as f:
+                st.download_button(
+                    label="📄 Descargar Archivo Excel",
+                    data=f,
+                    file_name=nombre_archivo,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
     except Exception as e:
         st.error(f"Error al generar los reportes: {str(e)}")
