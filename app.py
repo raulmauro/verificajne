@@ -180,12 +180,15 @@ def login_page():
 def admin_page():
     st.title("Panel de Administración")
     tab1, tab2, tab3 = st.tabs(["Usuarios", "Asignaciones", "Reportes"])
-
+    
     with tab1:
         st.subheader("Gestión de Usuarios")
-        with sqlite3.connect('jne_verification.db') as conn:
-            usuarios = pd.read_sql("SELECT id, username, nombre, rol, activo FROM usuarios", conn)
+        conn = sqlite3.connect('jne_verification.db')
+        try:
+            usuarios = pd.read_sql_query("SELECT id, username, nombre, rol, activo FROM usuarios", conn)
+            usuarios['activo'] = usuarios['activo'].map({1: 'Sí', 0: 'No'})
             st.dataframe(usuarios)
+
             with st.expander("Crear Nuevo Usuario"):
                 with st.form("nuevo_usuario"):
                     username = st.text_input("Nombre de usuario")
@@ -205,7 +208,10 @@ def admin_page():
                             st.rerun()
                         except sqlite3.IntegrityError:
                             st.error("El nombre de usuario ya existe")
-        conn.close()
+                        except Exception as e:
+                            st.error(f"Error al registrar: {str(e)}")
+        finally:
+            conn.close()
 
     with tab2:
         st.subheader("Asignación de Trabajo")
