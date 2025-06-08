@@ -58,7 +58,6 @@ def init_db():
                      inicio_informes TEXT,
                      fin_informes TEXT,
                      dni TEXT,
-                     num_fic TEXT,
                      autentica INTEGER,
                      falsa INTEGER,
                      tiempo_min INTEGER,
