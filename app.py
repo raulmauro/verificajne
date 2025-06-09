@@ -9,7 +9,7 @@ import time
 import plotly.express as px
 
 # --- CONFIGURACIÓN INICIAL ---
-st.set_page_config(page_title="Sistema JNE - Verificación Firmas", layout="wide")
+st.set_page_config(page_title="Sistema - Verificación Firmas", layout="wide")
 
 # --- CONSTANTES ---
 ARCHIVO_FICHAS = "fichas.xlsx"
@@ -152,7 +152,7 @@ def exportar_reporte_excel():
 
 # --- PÁGINAS ---
 def login_page():
-    st.title("Sistema de Verificación de Firmas - JNE")
+    st.title("Sistema de Verificación de Firmas v.1.0")
     with st.form("login_form"):
         username = st.text_input("Usuario")
         password = st.text_input("Contraseña", type="password")
