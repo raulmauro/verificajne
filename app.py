@@ -582,3 +582,6 @@ if __name__ == "__main__":
     init_db()
     create_admin_user()
     main()
+
+# Nota al pie
+st.caption("© 2025 - Sistema de Verificación de Firmas desarrollado por Raúl Mauro | Versión 1.0")
